@@ -1,82 +1,153 @@
 
 # coding: utf-8
 
-# In[4]:
+# In[1]:
+
+
+from __future__ import print_function, division
 
 import torch
 import torchvision
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 import torchvision.transforms as transforms
+import os
+import pandas as pd
+from skimage import io, transform
+import numpy as np
+import matplotlib.pyplot as plt
+from torch.utils.data import Dataset, DataLoader
+from torchvision import utils
 
 
-# In[5]:
+# In[2]:
 
-batchsize=8
-epoch_num=5
-learning_rate=0.0002
+
+print(torch.__version__)
 
 
 # In[6]:
 
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-trainset = torchvision.datasets.CIFAR10(root='~/eunbi', train=True,
-                                        download=True, transform=transform)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=batchsize,
-                                          shuffle=True, num_workers=2)
+batchsize=128
+epoch_num=10000
+learning_rate=0.0005
 
-testset = torchvision.datasets.CIFAR10(root='~/eunbi', train=False,
-                                       download=True, transform=transform)
-testloader = torch.utils.data.DataLoader(testset, batch_size=batchsize,
-                                         shuffle=False, num_workers=2)
 
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+# In[ ]:
+
+
+transform_train = transforms.Compose([
+    transforms.RandomCrop(24),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+])
+
+transform_test = transforms.Compose([
+    transforms.CenterCrop(24),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
+
+
+# In[ ]:
+
+
+trainset = torchvision.datasets.CIFAR10(root='~/eunbi', train=True, transform=transform_train)
+trainloader = DataLoader(trainset, batch_size=batchsize, shuffle=True, num_workers=4)
+
+
+testset = torchvision.datasets.CIFAR10(root='~/eunbi', train=False, transform=transform_test)
+testloader = DataLoader(testset, batch_size=batchsize, shuffle=False, num_workers=4)
+
+
+# In[ ]:
+
+
+num_classes = 10
+classes = ('airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 
 # In[7]:
 
-import torch.nn as nn
-import torch.nn.functional as F
+
+plt.ion()
+fig = plt.figure()
+
+for i in range(4):
+    image, label = trainset[i]
+
+    ax = plt.subplot(1, 4, i + 1)
+    plt.tight_layout()
+    ax.set_title('#{}: {}'.format(i, classes[label]))
+    ax.axis('off')
+
+    image = image / 2 + 0.5     # unnormalize
+    npimage = image.numpy()
+    npimage = np.transpose(npimage, (1, 2, 0))
+    plt.imshow(npimage)
+    
+image = image.unsqueeze(0)
+
+
+# In[8]:
+
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(device)
+
+
+# In[9]:
 
 
 class Net(nn.Module):
+    
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
-
+        self.conv1 = nn.Conv2d(3, 32, stride=1, kernel_size=1)
+        self.conv2 = nn.Conv2d(32, 10, kernel_size=3)
+        self.conv3 = nn.Conv2d(10, 20, kernel_size=2)
+        self.conv4 = nn.Conv2d(20, 40, kernel_size=3)
+        self.conv5 = nn.Conv2d(40, 30, kernel_size=2)
+        self.mp = nn.MaxPool2d(2, padding=1, stride=1)
+        self.fc1 = nn.Linear(15870, 60)           # 500 can be changed
+        self.fc2 = nn.Linear(60, 30)
+        self.fc3 = nn.Linear(30, 10)
+        
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 5 * 5)
+        in_size = x.size(0)
+        x = self.mp(F.relu(self.conv1(x)))
+        x = self.mp(F.relu(self.conv2(x)))
+        x = self.mp(F.relu(self.conv3(x)))
+        x = self.mp(F.relu(self.conv4(x)))
+        x = self.mp(F.relu(self.conv5(x)))
+        x = x.view(in_size, -1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
-        return x  
-
+        
+        return x
+    
 net = Net()
 
 if torch.cuda.is_available():
     net.to(device)
 
 
-# In[ ]:
+# In[10]:
 
-import torch.optim as optim
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(net.parameters(), lr=learning_rate)
 
 
-# In[ ]:
+# In[11]:
+
 
 #Training the network
+
 
 if torch.cuda.is_available():
     for epoch in range(epoch_num):  
@@ -117,9 +188,11 @@ else:
 print('Finished Training')
 
 
-# In[ ]:
+# In[14]:
+
 
 #Test data
+
 with torch.no_grad():
     num_correct = 0
     total_data = 0
@@ -127,7 +200,7 @@ with torch.no_grad():
         for images, labels in testloader:
             images=images.to(device)
             labels=labels.to(device)
-            output = net(image)
+            output = net(images)
             _, expected = torch.max(output.data, 1)
 
             total_data += labels.size(0)
@@ -144,13 +217,15 @@ with torch.no_grad():
 print('Accuracy of the Data: %d %%' % (100 * num_correct / total_data))
 
 
-# In[ ]:
+# In[15]:
+
 
 class_correct = list(0. for i in range(10))
 class_total = list(0. for i in range(10))
 with torch.no_grad():
-    for data in testloader:
-        images, labels = data
+    for images, labels in testloader:
+        images=images.to(device)
+        labels=labels.to(device)
         output = net(images)
         _, expected = torch.max(output, 1)
         c = (expected == labels).squeeze()
@@ -163,19 +238,4 @@ with torch.no_grad():
 for i in range(10):
     print('Accuracy of %5s : %2d %%' % (
         classes[i], 100 * class_correct[i] / class_total[i]))
-
-
-# In[ ]:
-
-
-
-
-# In[ ]:
-
-
-
-
-# In[ ]:
-
-
 
